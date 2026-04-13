@@ -1,0 +1,124 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      artifact_base: ${{ steps.meta.outputs.artifact_base }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .[dev]
+
+      - name: Resolve version metadata
+        id: meta
+        shell: pwsh
+        run: |
+          $version = (python scripts/version.py show).Trim()
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "artifact_base=TunnelSpot-v$version-windows-x64" >> $env:GITHUB_OUTPUT
+
+      - name: Validate tag matches project version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $expected = "v${{ steps.meta.outputs.version }}"
+          if ("${{ github.ref_name }}" -ne $expected) {
+            throw "Tag '${{ github.ref_name }}' does not match project version '$expected'."
+          }
+
+      - name: Lint
+        run: python -m ruff check .
+
+      - name: Test
+        run: python -m pytest
+
+      - name: Build executable
+        shell: pwsh
+        run: |
+          if (Test-Path .venv) { Remove-Item -LiteralPath .venv -Recurse -Force }
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install -e .[dev]
+          .\scripts\build_exe.ps1
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact_base }}
+          path: |
+            release/${{ steps.meta.outputs.artifact_base }}.exe
+            release/${{ steps.meta.outputs.artifact_base }}.zip
+            release/${{ steps.meta.outputs.artifact_base }}.sha256
+          if-no-files-found: error
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    needs: build-windows
+    permissions:
+      contents: write
+    steps:
+      - name: Download workflow artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: ${{ needs.build-windows.outputs.artifact_base }}
+          path: release
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build-windows.outputs.version }}
+          ARTIFACT_BASE: ${{ needs.build-windows.outputs.artifact_base }}
+        shell: pwsh
+        run: |
+          $tag = "v$env:VERSION"
+          $exeName = "$env:ARTIFACT_BASE.exe"
+          $zipName = "$env:ARTIFACT_BASE.zip"
+          $shaName = "$env:ARTIFACT_BASE.sha256"
+          $notes = @"
+          TunnelSpot $env:VERSION
+
+          Artifacts:
+          - $exeName
+          - $zipName
+          - $shaName
+
+          Build:
+          - OS: windows-latest
+          - Python: 3.13
+          - Commit: $env:GITHUB_SHA
+          "@
+
+          gh release create $tag `
+            "release\$exeName" `
+            "release\$zipName" `
+            "release\$shaName" `
+            --title "TunnelSpot v$env:VERSION" `
+            --notes $notes `
+            --generate-notes `
+            --verify-tag `
+            --latest
