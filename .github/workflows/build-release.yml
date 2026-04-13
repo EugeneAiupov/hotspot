@@ -82,6 +82,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
       - name: Download workflow artifacts
         uses: actions/download-artifact@v5
         with:
@@ -91,6 +96,7 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.build-windows.outputs.version }}
           ARTIFACT_BASE: ${{ needs.build-windows.outputs.artifact_base }}
         shell: pwsh
@@ -114,6 +120,7 @@ jobs:
           "@
 
           gh release create $tag `
+            --repo $env:GH_REPO `
             "release\$exeName" `
             "release\$zipName" `
             "release\$shaName" `
