@@ -17,3 +17,4 @@ release/
 htmlcov/
 src/*.egg-info/
 src/**/*.egg-info/
+*.txt
