@@ -82,11 +82,6 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
       - name: Download workflow artifacts
         uses: actions/download-artifact@v5
         with:
@@ -94,38 +89,26 @@ jobs:
           path: release
 
       - name: Publish GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          VERSION: ${{ needs.build-windows.outputs.version }}
-          ARTIFACT_BASE: ${{ needs.build-windows.outputs.artifact_base }}
-        shell: pwsh
-        run: |
-          $tag = "v$env:VERSION"
-          $exeName = "$env:ARTIFACT_BASE.exe"
-          $zipName = "$env:ARTIFACT_BASE.zip"
-          $shaName = "$env:ARTIFACT_BASE.sha256"
-          $notes = @"
-          TunnelSpot $env:VERSION
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ needs.build-windows.outputs.version }}
+          name: TunnelSpot v${{ needs.build-windows.outputs.version }}
+          body: |
+            TunnelSpot ${{ needs.build-windows.outputs.version }}
 
-          Artifacts:
-          - $exeName
-          - $zipName
-          - $shaName
+            Artifacts:
+            - ${{ needs.build-windows.outputs.artifact_base }}.exe
+            - ${{ needs.build-windows.outputs.artifact_base }}.zip
+            - ${{ needs.build-windows.outputs.artifact_base }}.sha256
 
-          Build:
-          - OS: windows-latest
-          - Python: 3.13
-          - Commit: $env:GITHUB_SHA
-          "@
-
-          gh release create $tag `
-            --repo $env:GH_REPO `
-            "release\$exeName" `
-            "release\$zipName" `
-            "release\$shaName" `
-            --title "TunnelSpot v$env:VERSION" `
-            --notes $notes `
-            --generate-notes `
-            --verify-tag `
-            --latest
+            Build:
+            - OS: windows-latest
+            - Python: 3.13
+            - Commit: ${{ github.sha }}
+          generate_release_notes: true
+          make_latest: true
+          fail_on_unmatched_files: true
+          files: |
+            release/${{ needs.build-windows.outputs.artifact_base }}.exe
+            release/${{ needs.build-windows.outputs.artifact_base }}.zip
+            release/${{ needs.build-windows.outputs.artifact_base }}.sha256
